@@ -224,7 +224,10 @@ ToolContext Assistant::tool_context(const Cfg& cfg) {
         timers_.clear();
         return n;
     };
-    ctx.request_confirm = [this](const std::string& action) { pending_power_ = action; };
+    ctx.request_confirm = [this](const std::string& tool, std::function<std::string()> on_yes) {
+        pending_tool_ = tool;
+        pending_action_ = std::move(on_yes);
+    };
     return ctx;
 }
 
@@ -265,7 +268,13 @@ std::string Assistant::system_prompt(const Config& c) const {
             "\" diye hitap et. Zeki, sakin, kibar ve hafif esprili konuş. Yanıtların sesli okunacak: kısa tut (genellikle "
             "1-3 cümle), markdown, madde işareti, emoji ve kod bloğu kullanma. Bilgisayarda bir şey yapman gerektiğinde "
             "araçlarını kullan ve sonucu kendi cümlelerinle kısaca aktar. Güncel ya da emin olmadığın bilgiler için "
-            "wikipedia veya web_search aracını kullan; bilgi uydurma. Her zaman Türkçe yanıt ver.\n";
+            "search_internet veya wikipedia aracını kullan; bilgi uydurma. Her zaman Türkçe yanıt ver.\n";
+        if (c.allow_files)
+            p += "Kullanıcının dosyalarına erişimin var: klasörleri listeleyebilir, dosya bulabilir, okuyabilir, yazabilir, "
+                 "taşıyabilir ve açabilirsin. Silmeden ya da üzerine yazmadan önce araç kullanıcıya sorar.\n";
+        if (c.allow_web)
+            p += "İnternete erişimin var: search_internet ile arama sonuçlarını, get_news ile haberleri, read_webpage ile "
+                 "sayfaların metnini okuyabilirsin. Sonuçları kendi cümlelerinle özetle.\n";
         p += "Şu an: " + today_text() + ", saat " + now_hm() + ".\n";
         if (!c.user_name.empty()) p += "Kullanıcının adı: " + c.user_name + ".\n";
         if (!c.city.empty()) p += "Kullanıcının şehri: " + c.city + ".\n";
@@ -280,7 +289,13 @@ std::string Assistant::system_prompt(const Config& c) const {
             "\". Be smart, calm, polite and lightly witty. Your replies are spoken aloud: keep them short (usually 1-3 "
             "sentences) and do not use markdown, bullet points, emoji or code blocks. Use your tools to act on the "
             "computer and report the result briefly in your own words. For current facts or anything you are unsure "
-            "of, use the wikipedia or web_search tool; never make things up. Always answer in English.\n";
+            "of, use the search_internet or wikipedia tool; never make things up. Always answer in English.\n";
+        if (c.allow_files)
+            p += "You have access to the user's files: list folders, find, read, write, move and open files. The tools ask "
+                 "the user before deleting or overwriting.\n";
+        if (c.allow_web)
+            p += "You have internet access: search_internet for results, get_news for headlines, read_webpage for a "
+                 "page's text. Summarize in your own words.\n";
         p += "Now: " + today_text() + ", " + now_hm() + ".\n";
         if (!c.user_name.empty()) p += "User's name: " + c.user_name + ".\n";
         if (!c.city.empty()) p += "User's city: " + c.city + ".\n";
@@ -348,7 +363,7 @@ std::string Assistant::run_llm(const Cfg& cfg, const std::string& text, size_t e
 
     std::string shown, used_tool, error;
     bool any_text = false;
-    for (int round = 0; round < 6; round++) {
+    for (int round = 0; round < 8; round++) {
         std::string round_text;
         size_t spoken = 0;
         std::string prefix = shown.empty() ? "" : shown + " ";
@@ -422,13 +437,12 @@ std::string Assistant::process(const std::string& raw) {
     std::string reply, tool_used;
     bool done = false;
 
-    if (!pending_power_.empty()) {
-        std::string action = pending_power_;
-        pending_power_.clear();
+    if (pending_action_) {
+        auto action = std::move(pending_action_);
+        pending_action_ = nullptr;
         if (matched && it.special == "yes") {
-            if (!dry_run_) power_action(action, action == "sleep" ? 0 : 60);
-            reply = T(("power_go_" + action).c_str());
-            tool_used = "power";
+            reply = action();
+            tool_used = pending_tool_;
             done = true;
         } else if (matched && it.special == "no") {
             reply = T("confirm_cancelled");

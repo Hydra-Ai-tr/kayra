@@ -35,6 +35,8 @@ Videodaki tüm uygulama görüntüleri gerçek kayıttır: uygulamanın kendisi,
 | **Sesle kontrol** | "Kayra" uyandırma kelimesi, her yerden **Ctrl+Shift+K**, cevaptan sonra uyandırma kelimesi olmadan devam |
 | **Bilgi** | Saat ve tarih, hava durumu (konumu kendisi bulur), Wikipedia özetleri, sistem durumu |
 | **Uygulamalar** | Başlat menüsündeki her uygulamayı adıyla açar ("Spotify'ı aç", "indirilenler klasörünü aç"), siteler, Google / YouTube / Haritalar araması |
+| **Dosyalar** | "Masaüstünde ne var", "rapor dosyasını bul", "notlar.txt'yi oku", yazma, taşıma, kopyalama; silme Geri Dönüşüm Kutusu'na gider ve önce onay ister |
+| **İnternet** | "Yapay zeka hakkında araştır", "son dakika haberleri", "teknoloji haberleri", web sayfası okuma |
 | **Medya** | Ses seviyesi, oynat / duraklat / sonraki, "Tarkan şarkısı aç" |
 | **Zamanlayıcı** | "10 dakika sonra toplantıyı hatırlat", "bir buçuk saat sonra…", ekranda geri sayım |
 | **Hesap** | "240'ın yüzde 15'i", "kök 144 artı 3 üzeri 2", "5'in karesi", "125 çarpı 48" |
@@ -57,13 +59,23 @@ Ayarlar → Beyin sekmesinden seçin:
 | OpenAI, Google Gemini, Groq, OpenRouter | bulut | API anahtarı gerekir |
 | Özel | herhangi bir OpenAI uyumlu adres | |
 
+### Sesler
+
+Ayarlar → Ses sekmesinden motor ve ses seçilir:
+
+| Motor | Sesler | Not |
+|---|---|---|
+| **Piper** (varsayılan) | Fahrettin, Fettah, DFKI · Alan, Jenny, Ryan, Lessac… | Doğal yapay sinir ağı sesi, bilgisayarda çalışır; ilk kullanımda indirilir (~85 MB) |
+| **Edge** | Ahmet, Emel · Ryan, Thomas, Sonia, Andrew, Brian, Ava | En doğal ses; internet ve Python ile `pip install edge-tts` gerekir (Ayarlar'da tek tuş) |
+| **Windows** | Tolga ve yüklü diğer sesler | Her zaman çalışır; diğerleri ulaşılamazsa yedek olarak kullanılır |
+
 ### Kurulum
 
 1. [Sürümler](https://github.com/Hydra-Ai-tr/kayra/releases/latest) sayfasından `kayra-0.1.0-windows-x64.zip` dosyasını indirip açın.
 2. `kayra.exe`'yi çalıştırın. Mikrofon düğmesine basın ya da **Ctrl+Shift+K**'ye basıp konuşun.
 3. Ses modeli (Small, ~180 MB) ilk kullanımda `%APPDATA%\Kayra\models` klasörüne indirilir.
 
-Türkçe ses için Windows'ta Türkçe konuşma paketi gerekir (Ayarlar → Saat ve dil → Konuşma → *Tolga*). Ayarlar `%APPDATA%\Kayra\config.json` dosyasında tutulur.
+Windows sesiyle Türkçe konuşma için Türkçe konuşma paketi gerekir (Ayarlar → Saat ve dil → Konuşma → *Tolga*). Ayarlar `%APPDATA%\Kayra\config.json` dosyasında tutulur.
 
 İşlemcinin AVX2 desteklemesi gerekir (2013 sonrası hemen her x86-64 işlemci).
 
@@ -73,6 +85,7 @@ Türkçe ses için Windows'ta Türkçe konuşma paketi gerekir (Ayarlar → Saat
 kayra-cli                       sohbet (yazın, Enter; 'q' çıkar)
 kayra-cli ask "saat kaç"        tek soru, cevabı yazar
 kayra-cli say "metin" [--wav f] konuşur ya da WAV yazar
+          [--engine piper|edge|sapi] [--as tr_TR-fettah-medium]
 kayra-cli voices                Windows sesleri
 kayra-cli listen                mikrofon -> komutlar (Ctrl+C durdurur)
 kayra-cli transcribe file.wav   konuşmayı yazıya çevirir
@@ -101,7 +114,8 @@ build\bin\kayra.exe
 ### Gizlilik
 
 - Ses tanıma bilgisayarınızda çalışır. Mikrofon sesi hiçbir yere gönderilmez.
-- İnternet yalnızca hava durumu (open-meteo.com; şehir ayarlanmamışsa konum için ip-api.com), Wikipedia ve seçtiğiniz bulut beyni için kullanılır.
+- İnternet yalnızca hava durumu (open-meteo.com; şehir ayarlanmamışsa konum için ip-api.com), Wikipedia, istediğiniz aramalar ve haberler (Bing, Google Haberler), Edge sesi ve seçtiğiniz bulut beyni için kullanılır.
+- Dosya ve internet erişimi Ayarlar → Beyin'den kapatılabilir. Silme ve üzerine yazma her zaman sesli onay ister.
 - Beyin konsol komutu çalıştıramaz; bunun için Ayarlar'dan açıkça izin vermeniz gerekir.
 
 ### Lisans
@@ -129,6 +143,8 @@ Every shot of the app in the video is a real recording of the app itself, in Kay
 | **Voice control** | Wake word "Kayra", **Ctrl+Shift+K** from anywhere, follow-up questions without the wake word |
 | **Information** | Time and date, weather (finds your location), Wikipedia summaries, system status |
 | **Apps** | Opens any Start-menu app by name ("open Spotify", "open my downloads folder"), web sites, Google / YouTube / Maps search |
+| **Files** | "What's on my desktop", "find the report file", "read notes.txt", write, move, copy; deleting goes to the Recycle Bin and asks first |
+| **Internet** | "Research artificial intelligence", "read the news", "technology news", reading web pages |
 | **Media** | Volume, play / pause / next, "play some music" |
 | **Timers** | "Remind me to call mom in 10 minutes", with an on-screen countdown |
 | **Math** | "15 percent of 240", "square root of 144 plus 3 squared" |
@@ -141,6 +157,16 @@ It works without a brain too: the built-in parser understands Turkish and Englis
 ### AI brain
 
 Choose one in Settings → Brain: built-in commands (offline, default), [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), [Kor Studio](https://github.com/Hydra-Ai-tr/kor-studio) (`kor-cli serve`), OpenAI, Google Gemini, Groq, OpenRouter, or any OpenAI-compatible URL.
+
+### Voices
+
+Pick an engine and a voice in Settings → Voice:
+
+| Engine | Voices | Note |
+|---|---|---|
+| **Piper** (default) | Alan, Northern English, Jenny, Ryan, Lessac · Fahrettin, Fettah, DFKI | Natural neural voices that run on your PC; downloaded on first use (~85 MB) |
+| **Edge** | Ryan, Thomas, Sonia, Andrew, Brian, Ava · Ahmet, Emel | The most natural; needs the internet and Python with `pip install edge-tts` (one button in Settings) |
+| **Windows** | Any installed voice | Always works; the fallback when the others are unavailable |
 
 ### Install
 
@@ -170,7 +196,8 @@ build\bin\kayra.exe
 ### Privacy
 
 - Speech recognition runs on your computer. Microphone audio is never sent anywhere.
-- The internet is used only for the weather (open-meteo.com; ip-api.com for your location if no city is set), Wikipedia and the cloud brain you choose.
+- The internet is used only for the weather (open-meteo.com; ip-api.com for your location if no city is set), Wikipedia, the searches and news you ask for (Bing, Google News), the Edge voice and the cloud brain you choose.
+- File and web access can be turned off in Settings → Brain. Deleting and overwriting always ask for a spoken yes.
 - The brain cannot run console commands unless you explicitly allow it in Settings.
 
 ### License

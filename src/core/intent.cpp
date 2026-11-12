@@ -3,6 +3,7 @@
 #include <map>
 #include <regex>
 
+#include "core/access.h"
 #include "core/apps.h"
 #include "core/calc.h"
 #include "core/i18n.h"
@@ -468,6 +469,65 @@ bool parse_intent(const std::string& text_in, Intent& out) {
     if (rx(g, "pano\\w* (oku|ne var)|kopyaladigim\\w* (oku|ne)|read (my |the )?clipboard|whats on (my |the )?clipboard")) {
         out = special("clipboard_say");
         return true;
+    }
+
+    // ---------------------------------------------------------------- news
+    if (rx(g, "^(bana )?(son |guncel |bugunun |gunun )?(dakika )?haber\\w*( neler| ne var| var mi| oku| okur musun| okusana| soyle| ver)?$") ||
+        rx(g, "^(gundemde ne var|gundem ne|neler oluyor|dunyada neler oluyor)$") ||
+        rx(g, "^((whats|what is) (in )?the news|(read |tell me )?(me )?(the )?(latest |todays )?(news|headlines))$")) {
+        out = tool("get_news");
+        return true;
+    }
+    if (rx(g, "^(.+?) (ile ilgili|hakkinda|hakkindaki) (son )?haber\\w*( neler| ne var| var mi| oku| soyle)?$", m) ||
+        rx(g, "^(?:son |guncel )?(.+?) haberleri( neler| ne| oku)?$", m) || rx(g, "^(?:the )?(?:latest )?news (?:about|on) (.+)$", m)) {
+        std::string topic = group(u, m, 1);
+        if (!fold(topic).empty()) {
+            out = tool("get_news", {{"topic", topic}});
+            return true;
+        }
+    }
+
+    // ---------------------------------------------------------------- files
+    if (rx(g, "^(.+?) (klasorunde |klasorumde |klasorunun icinde )?(ne var|neler var|hangi dosyalar var|neler duruyor)$", m) ||
+        rx(g, "^(.+?) (klasorunu |klasorumu |dosyalarini )?listele$", m) ||
+        rx(g, "^(?:whats|what is) (?:on|in) (?:my |the )?(.+?)(?: folder)?$", m) ||
+        rx(g, "^(?:list|show) (?:me )?(?:the )?(?:files (?:on|in) )?(?:my |the )?(.+?)(?: folder)?$", m)) {
+        std::string what = fold(m[1].str());
+        std::string id = folder_alias(what);
+        if (!id.empty()) {
+            out = tool("list_folder", {{"path", id}});
+            return true;
+        }
+    }
+    if (rx(g, "^(.+?) (?:adli |isimli )?(?:dosya\\w*|belge\\w*|klasor\\w*) (?:bul|ara|nerede|nerde|arar misin|bulur musun|bulabilir misin)$", m) ||
+        rx(g, "^(?:find|search for|look for|locate) (?:the |my )?(?:file|files|document|folder) (?:named |called )?(.+)$", m) ||
+        rx(g, "^where is (?:the |my )?(?:file )?(.+ (?:txt|pdf|docx?|xlsx?|pptx?|png|jpe?g|mp3|mp4|zip|csv))$", m)) {
+        std::string q = group(u, m, 1);
+        if (!fold(q).empty()) {
+            out = tool("find_files", {{"query", q}});
+            return true;
+        }
+    }
+    if (rx(g, "^(.+?) (?:dosyasini|belgesini|dosyasindakileri|dosyasinin icerigini) (?:oku|okur musun|okusana|oku bana)$", m) ||
+        rx(g, "^(.+?) (?:dosyasinda|belgesinde) (?:ne yaziyor|ne var|neler yaziyor)$", m) ||
+        rx(g, "^read (?:me )?(?:the |my )?file (.+)$", m) ||
+        rx(g, "^read (?:me )?(?:the |my )?(.+ (?:txt|md|csv|json|log))$", m)) {
+        std::string q = group(u, m, 1);
+        if (!fold(q).empty()) {
+            out = tool("read_file", {{"path", q}});
+            return true;
+        }
+    }
+
+    // ---------------------------------------------------------------- web research
+    if (rx(g, "^(?:internette|internetten|webde) (.+?) (?:hakkinda )?(?:arastir|ara ve oku|ne diyor|ne yaziyor|bilgi bul)$", m) ||
+        rx(g, "^(.+?) (?:hakkinda |ile ilgili )?(?:arastir|arastirma yap|internette arastir|internetten arastir|internetten bak|internete bak)$", m) ||
+        rx(g, "^(?:research|look up online|search online for|check online|find online) (.+)$", m)) {
+        std::string q = group(u, m, 1);
+        if (!fold(q).empty()) {
+            out = tool("search_internet", {{"query", q}});
+            return true;
+        }
     }
 
     // ---------------------------------------------------------------- search

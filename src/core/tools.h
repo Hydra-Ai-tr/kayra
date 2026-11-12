@@ -15,8 +15,8 @@ struct ToolContext {
     Memory* mem = nullptr;
     std::function<void(double seconds, const std::string& label)> add_timer;
     std::function<int()> cancel_timers;
-    // Shutdown and friends wait for a spoken "yes".
-    std::function<void(const std::string& action)> request_confirm;
+    // Shutdown, deleting and overwriting wait for a spoken "yes"; on_yes runs then and returns the reply.
+    std::function<void(const std::string& tool, std::function<std::string()> on_yes)> request_confirm;
     bool dry_run = false;  // demo recording: report, but do not touch the PC
 };
 

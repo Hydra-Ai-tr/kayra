@@ -58,11 +58,13 @@ add_library(kayracore STATIC
   src/core/system.cpp
   src/core/apps.cpp
   src/core/memory.cpp
+  src/core/access.cpp
   src/core/tools.cpp
   src/core/intent.cpp
   src/core/llm.cpp
   src/core/assistant.cpp
   src/voice/tts.cpp
+  src/voice/neural.cpp
   src/voice/mic.cpp
   src/voice/stt.cpp
   src/voice/listener.cpp)
@@ -70,7 +72,8 @@ target_include_directories(kayracore PUBLIC src)
 target_compile_definitions(kayracore PUBLIC KAYRA_VERSION="${PROJECT_VERSION}"
   UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
 target_link_libraries(kayracore PUBLIC nlohmann_json::nlohmann_json
-  winhttp ole32 oleaut32 uuid sapi winmm gdiplus gdi32 user32 shell32 shlwapi advapi32 powrprof)
+  winhttp ole32 oleaut32 uuid sapi winmm gdiplus gdi32 user32 shell32 shlwapi advapi32 powrprof
+  mfplat mfreadwrite mfuuid)
 if(NOT MSVC)
   target_compile_options(kayracore PRIVATE -Wall -Wextra -Wno-unknown-pragmas -Wno-missing-field-initializers)
 endif()

@@ -107,7 +107,9 @@ private:
     std::vector<TimerInfo> timers_;
     int next_timer_ = 1;
 
-    std::string pending_power_;
+    // an action waiting for a spoken "yes" (shutdown, delete, overwrite)
+    std::function<std::string()> pending_action_;
+    std::string pending_tool_;
 };
 
 }  // namespace kayra

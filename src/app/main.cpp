@@ -34,6 +34,7 @@
 #include "core/util.h"
 #include "voice/listener.h"
 #include "voice/mic.h"
+#include "voice/neural.h"
 #include "voice/stt.h"
 #include "voice/tts.h"
 
@@ -135,6 +136,7 @@ private:
     std::vector<VoiceInfo> voices_;
     std::vector<std::string> mics_;
     std::atomic<bool> testing_{false};
+    std::atomic<bool> installing_{false};
     std::mutex test_mu_;
     std::string test_result_;
     double saved_at_ = -100;
@@ -252,7 +254,7 @@ void App::stop_threads() {
 
 // ------------------------------------------------------------------ flow
 
-void App::configure_voice(const Config& c) { tts_.configure(c.turkish() ? "tr" : "en", c.voice, c.voice_rate, c.voice_volume); }
+void App::configure_voice(const Config& c) { tts_.configure(voice_settings(c)); }
 
 void App::talk() {
     if (tts_.speaking()) tts_.stop();
@@ -469,6 +471,8 @@ void App::tab_brain() {
         float temp = (float)edit_.temperature;
         if (ImGui::SliderFloat(U("set_temperature"), &temp, 0.0f, 1.5f, "%.2f")) edit_.temperature = temp;
         ImGui::Checkbox(U("set_tools"), &edit_.use_tools);
+        ImGui::Checkbox(U("set_files"), &edit_.allow_files);
+        ImGui::Checkbox(U("set_web"), &edit_.allow_web);
         ImGui::Checkbox(U("set_shell"), &edit_.allow_shell);
         ImGui::Spacing();
         ImGui::BeginDisabled(testing_);
@@ -509,8 +513,63 @@ void App::tab_brain() {
 
 void App::tab_voice() {
     ImGui::Checkbox(U("set_speak"), &edit_.speak);
+    ImGui::Spacing();
+    const char* engines[] = {"piper", "edge", "sapi"};
+    std::string engine_names[] = {T("set_engine_piper"), T("set_engine_edge"), T("set_engine_sapi")};
+    int ei = edit_.voice_engine == "edge" ? 1 : edit_.voice_engine == "sapi" ? 2 : 0;
+    if (ImGui::BeginCombo(U("set_engine"), engine_names[ei].c_str())) {
+        for (int i = 0; i < 3; i++)
+            if (ImGui::Selectable(engine_names[i].c_str(), ei == i)) {
+                edit_.voice_engine = engines[i];
+                configure_voice(edit_);
+            }
+        ImGui::EndCombo();
+    }
+    std::string lang = edit_.turkish() ? "tr" : "en";
+    if (edit_.voice_engine != "sapi") {
+        bool edge = edit_.voice_engine == "edge";
+        std::string& chosen = edge ? edit_.edge_voice : edit_.piper_voice;
+        std::string cur = pick_neural_voice(edit_.voice_engine, chosen, lang);
+        std::string shown_n = neural_label(edit_.voice_engine, cur);
+        if (ImGui::BeginCombo(U("set_voice_name"), shown_n.c_str())) {
+            for (auto& v : edge ? edge_voices() : piper_voices()) {
+                if (lang != v.lang) continue;
+                std::string label = std::string(v.label) + "##" + v.id;
+                if (ImGui::Selectable(label.c_str(), cur == v.id)) {
+                    chosen = v.id;
+                    configure_voice(edit_);
+                }
+            }
+            ImGui::EndCombo();
+        }
+        float p = tts_.engine_progress();
+        if (p >= 0.0f) {
+            ImGui::ProgressBar(p, ImVec2(-1, 0), F("set_engine_downloading", {std::to_string((int)(p * 100))}).c_str());
+        } else if (tts_.engine_ready()) {
+            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.7f, 1), "%s", U("set_engine_ready"));
+        } else {
+            ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.35f, 1), "%s", U("set_engine_missing"));
+            if (edge) {
+                ImGui::SameLine();
+                ImGui::BeginDisabled(installing_);
+                if (ImGui::Button(U("set_engine_install"))) {
+                    installing_ = true;
+                    std::thread([this] {
+                        std::string out;
+                        bool ok = edge_install(&out);
+                        log(std::string("edge-tts install ") + (ok ? "ok" : "failed: ") + (ok ? "" : out));
+                        tts_.refresh_engine();
+                        installing_ = false;
+                    }).detach();
+                }
+                ImGui::EndDisabled();
+            }
+        }
+        ImGui::TextWrapped("%s", U(edge ? "set_engine_note_edge" : "set_engine_note_piper"));
+        ImGui::Spacing();
+    }
     std::string shown = edit_.voice.empty() ? T("set_auto_voice") : edit_.voice;
-    if (ImGui::BeginCombo(U("set_voice_name"), shown.c_str())) {
+    if (ImGui::BeginCombo(U(edit_.voice_engine == "sapi" ? "set_voice_name" : "set_windows_voice"), shown.c_str())) {
         if (ImGui::Selectable(U("set_auto_voice"), edit_.voice.empty())) edit_.voice.clear();
         for (auto& v : voices_) {
             std::string label = v.name + "  [" + v.lang + "]";

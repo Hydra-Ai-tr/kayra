@@ -1,8 +1,14 @@
 #include "core/tools.h"
 
-#include <cmath>
-#include <ctime>
+#include <windows.h>
 
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <ctime>
+#include <filesystem>
+
+#include "core/access.h"
 #include "core/apps.h"
 #include "core/calc.h"
 #include "core/http.h"
@@ -85,7 +91,24 @@ ToolResult t_open_app(const json& a, ToolContext& ctx) {
     std::string name = trim(str_arg(a, "name"));
     if (name.empty()) return fail(T("open_what"));
     OpenTarget t;
-    if (!app_index().resolve(name, ctx.cfg->apps, t)) return fail(F("app_not_found", {name}), "not found: " + name);
+    if (!app_index().resolve(name, ctx.cfg->apps, t)) {
+        // "bütçe dosyasını aç": a file or folder of the user's
+        if (ctx.cfg->allow_files) {
+            std::string want = fold(name);
+            for (auto& e : find_files(name, "", 5, 2.5)) {
+                std::string stem = fold(e.dir ? e.name : e.name.substr(0, e.name.find_last_of('.')));
+                std::string q = want;
+                for (const char* w : {" dosyasini", " dosyasi", " dosyalarini", " belgesini", " belgesi", " klasorunu",
+                                      " klasoru", " file", " folder", " document"})
+                    if (ends_with(q, w)) q = q.substr(0, q.size() - strlen(w));
+                if (!q.empty() && (stem == q || starts_with(stem, q) || fold(e.name) == q)) {
+                    if (!ctx.dry_run && !shell_open(e.path)) return fail(F("open_failed", {e.name}));
+                    return done(F("opening_file", {e.name}), {{"opened", e.name}, {"target", e.path}});
+                }
+            }
+        }
+        return fail(F("app_not_found", {name}), "not found: " + name);
+    }
     std::string disp = t.display;
     if (!ctx.dry_run && !app_index().open(t)) return fail(F("open_failed", {disp}));
     std::string key = t.kind == "folder" ? "opening_folder" : t.kind == "site" ? "opening_site" : "opening_app";
@@ -268,7 +291,12 @@ ToolResult t_power(const json& a, ToolContext& ctx) {
         return done(T("power_cancelled"));
     }
     if (action != "shutdown" && action != "restart" && action != "sleep") return fail(T("power_unknown"));
-    if (ctx.request_confirm) ctx.request_confirm(action);
+    bool dry = ctx.dry_run;
+    if (ctx.request_confirm)
+        ctx.request_confirm("power", [action, dry] {
+            if (!dry) power_action(action, action == "sleep" ? 0 : 60);
+            return T(("power_go_" + action).c_str());
+        });
     return done(F("confirm_power", {T(("power_" + action).c_str())}),
                 {{"needs_confirmation", true}, {"note", "Ask the user to say yes to confirm."}});
 }
@@ -302,6 +330,244 @@ ToolResult t_run(const json& a, ToolContext& ctx) {
     if (ctx.dry_run) out = "(demo)";
     else if (!run_command(cmd, out)) return fail(T("command_failed"));
     return done(T("command_done"), {{"output", out}});
+}
+
+// ------------------------------------------------------------------ files
+
+std::string base_name(const std::string& p) {
+    size_t k = p.find_last_of('\\');
+    return k == std::string::npos ? p : p.substr(k + 1);
+}
+
+std::string parent_of(const std::string& p) {
+    size_t k = p.find_last_of('\\');
+    return k == std::string::npos ? p : p.substr(0, k);
+}
+
+// Cuts text to about n bytes at a word boundary, UTF-8 safe.
+std::string clip(const std::string& s, size_t n) {
+    if (s.size() <= n) return s;
+    size_t k = s.rfind(' ', n);
+    if (k == std::string::npos || k < n / 2) {
+        k = n;
+        while (k > 0 && ((unsigned char)s[k] & 0xC0) == 0x80) k--;
+    }
+    return trim(s.substr(0, k)) + "…";
+}
+
+std::string iso_time(int64_t t) {
+    std::time_t tt = (std::time_t)t;
+    std::tm tm{};
+    localtime_s(&tm, &tt);
+    char b[32];
+    std::strftime(b, sizeof b, "%Y-%m-%d %H:%M", &tm);
+    return b;
+}
+
+json entry_json(const FileEntry& e) {
+    json j = {{"name", e.name}, {"path", e.path}, {"type", e.dir ? "folder" : "file"}, {"modified", iso_time(e.modified)}};
+    if (!e.dir) j["size"] = size_text(e.size, false);
+    return j;
+}
+
+// A path as given, or the best match of a name search ("rapor.docx", "bütçe tablosu").
+std::string locate(const std::string& given, bool want_dir = false) {
+    std::string p = resolve_path(given);
+    DWORD a = GetFileAttributesW(widen(p).c_str());
+    if (a != INVALID_FILE_ATTRIBUTES) return p;
+    std::string g = trim(given);
+    if (g.empty() || g.find('\\') != std::string::npos || g.find('/') != std::string::npos) return "";
+    for (auto& e : find_files(g, "", 10, 3.0))
+        if (!want_dir || e.dir) return e.path;
+    return "";
+}
+
+ToolResult t_list_folder(const json& a, ToolContext& ctx) {
+    if (!ctx.cfg->allow_files) return fail(T("files_disabled"));
+    std::string given = trim(str_arg(a, "path", "desktop"));
+    std::string path = locate(given.empty() ? "desktop" : given, true);
+    std::vector<FileEntry> items;
+    std::string err;
+    if (path.empty() || !list_folder(path, items, &err)) return fail(F("folder_not_found", {given}), err);
+    std::string place = place_name(path);
+    if (items.empty()) return done(F("folder_empty", {place}), {{"path", path}, {"items", json::array()}});
+    json list = json::array();
+    for (size_t i = 0; i < items.size() && i < 200; i++) list.push_back(entry_json(items[i]));
+    // newest first for speaking, folders included
+    std::vector<FileEntry> recent = items;
+    std::sort(recent.begin(), recent.end(), [](const FileEntry& x, const FileEntry& y) { return x.modified > y.modified; });
+    std::string names;
+    size_t shown = std::min<size_t>(recent.size(), 5);
+    for (size_t i = 0; i < shown; i++) names += (i ? ", " : "") + recent[i].name;
+    std::string say = items.size() <= 5 ? F("folder_list", {place, std::to_string(items.size()), names})
+                                        : F("folder_list_more", {place, std::to_string(items.size()), names});
+    return done(say, {{"path", path}, {"count", items.size()}, {"items", list}});
+}
+
+ToolResult t_find_files(const json& a, ToolContext& ctx) {
+    if (!ctx.cfg->allow_files) return fail(T("files_disabled"));
+    std::string q = trim(str_arg(a, "query"));
+    if (q.empty()) return fail(T("search_what"));
+    std::string folder = trim(str_arg(a, "folder"));
+    std::string root = folder.empty() ? "" : resolve_path(folder);
+    auto hits = find_files(q, root, 30, 4.0);
+    if (hits.empty()) return fail(F("files_none", {q}), "no matches");
+    json list = json::array();
+    for (auto& e : hits) list.push_back(entry_json(e));
+    std::string where = place_name(parent_of(hits[0].path));
+    std::string say = hits.size() == 1 ? F("files_found_one", {hits[0].name, where})
+                                       : F("files_found", {std::to_string(hits.size()), hits[0].name, where});
+    return done(say, {{"matches", list}});
+}
+
+ToolResult t_read_file(const json& a, ToolContext& ctx) {
+    if (!ctx.cfg->allow_files) return fail(T("files_disabled"));
+    std::string given = trim(str_arg(a, "path"));
+    std::string path = locate(given);
+    if (path.empty()) return fail(F("file_not_found", {given}));
+    std::string text, err;
+    std::string name = base_name(path);
+    if (!read_text_file(path, text, 512 * 1024, &err)) {
+        if (err == "not a text file") return fail(F("file_binary", {name}), err + "; open it with open_file instead");
+        return fail(F("file_not_found", {given}), err);
+    }
+    if (trim(text).empty()) return done(F("file_empty", {name}), {{"path", path}, {"text", ""}});
+    bool cut = text.size() > 15000;
+    std::string spoken = text;
+    for (auto& c : spoken)
+        if (c == '\n' || c == '\r' || c == '\t') c = ' ';
+    return done(F("file_read", {name, clip(trim(spoken), 280)}),
+                {{"path", path}, {"text", cut ? clip(text, 15000) : text}, {"truncated", cut}});
+}
+
+bool write_text(const std::string& path, const std::string& content, bool append) {
+    std::error_code ec;
+    std::filesystem::create_directories(std::filesystem::path(widen(parent_of(path))), ec);
+    std::string data = content;
+    if (append) {
+        std::string old;
+        if (read_file(path, old) && !old.empty()) data = old + (old.back() == '\n' ? "" : "\n") + content;
+    }
+    return write_file(path, data);
+}
+
+ToolResult t_write_file(const json& a, ToolContext& ctx) {
+    if (!ctx.cfg->allow_files) return fail(T("files_disabled"));
+    std::string path = resolve_path(str_arg(a, "path"));
+    std::string content = str_arg(a, "content");
+    bool append = a.value("append", false);
+    std::string name = base_name(path);
+    bool dry = ctx.dry_run;
+    if (!append && file_exists(path)) {
+        if (ctx.request_confirm)
+            ctx.request_confirm("write_file", [path, content, name, dry] {
+                return dry || write_text(path, content, false) ? F("file_written", {name}) : F("file_write_failed", {name});
+            });
+        return done(F("confirm_overwrite", {name}), {{"needs_confirmation", true}, {"note", "Ask the user to say yes to confirm."}});
+    }
+    if (!dry && !write_text(path, content, append)) return fail(F("file_write_failed", {name}));
+    return done(F(append ? "file_appended" : "file_written", {name}), {{"path", path}});
+}
+
+ToolResult t_transfer(const json& a, ToolContext& ctx, bool move) {
+    if (!ctx.cfg->allow_files) return fail(T("files_disabled"));
+    std::string given = trim(str_arg(a, "from"));
+    std::string from = locate(given);
+    if (from.empty()) return fail(F("file_not_found", {given}));
+    std::string to = resolve_path(str_arg(a, "to"));
+    DWORD ta = GetFileAttributesW(widen(to).c_str());
+    if (ta != INVALID_FILE_ATTRIBUTES && (ta & FILE_ATTRIBUTE_DIRECTORY)) to += "\\" + base_name(from);
+    if (file_exists(to)) return fail(F("target_exists", {base_name(to)}));
+    std::string name = base_name(from);
+    if (!ctx.dry_run) {
+        std::error_code ec;
+        std::filesystem::path src(widen(from)), dst(widen(to));
+        std::filesystem::create_directories(dst.parent_path(), ec);
+        ec.clear();
+        if (move) {
+            if (!MoveFileExW(src.c_str(), dst.c_str(), MOVEFILE_COPY_ALLOWED)) return fail(F("move_failed", {name}));
+        } else {
+            std::filesystem::copy(src, dst, std::filesystem::copy_options::recursive, ec);
+            if (ec) return fail(F("copy_failed", {name}), ec.message());
+        }
+    }
+    std::string where = place_name(parent_of(to));
+    return done(F(move ? "moved" : "copied", {name, where}), {{"from", from}, {"to", to}});
+}
+
+ToolResult t_create_folder(const json& a, ToolContext& ctx) {
+    if (!ctx.cfg->allow_files) return fail(T("files_disabled"));
+    std::string path = resolve_path(str_arg(a, "path"));
+    std::string name = base_name(path);
+    std::error_code ec;
+    if (!ctx.dry_run && !std::filesystem::create_directories(std::filesystem::path(widen(path)), ec) && ec)
+        return fail(F("folder_create_failed", {name}), ec.message());
+    return done(F("folder_created", {name}), {{"path", path}});
+}
+
+ToolResult t_delete(const json& a, ToolContext& ctx) {
+    if (!ctx.cfg->allow_files) return fail(T("files_disabled"));
+    std::string given = trim(str_arg(a, "path"));
+    std::string path = locate(given);
+    if (path.empty()) return fail(F("file_not_found", {given}));
+    std::string name = base_name(path);
+    bool dry = ctx.dry_run;
+    if (ctx.request_confirm)
+        ctx.request_confirm("delete_file", [path, name, dry] {
+            return dry || recycle_path(path) ? F("deleted", {name}) : F("delete_failed", {name});
+        });
+    return done(F("confirm_delete", {name}), {{"path", path}, {"needs_confirmation", true}, {"note", "Ask the user to say yes to confirm."}});
+}
+
+ToolResult t_open_file(const json& a, ToolContext& ctx) {
+    if (!ctx.cfg->allow_files) return fail(T("files_disabled"));
+    std::string given = trim(str_arg(a, "path"));
+    std::string path = locate(given);
+    if (path.empty()) return fail(F("file_not_found", {given}));
+    if (!ctx.dry_run && !shell_open(path)) return fail(F("open_failed", {base_name(path)}));
+    return done(F("opening_file", {base_name(path)}), {{"path", path}});
+}
+
+// ------------------------------------------------------------------ web
+
+ToolResult t_search_internet(const json& a, ToolContext& ctx) {
+    if (!ctx.cfg->allow_web) return fail(T("web_disabled"));
+    std::string q = trim(str_arg(a, "query"));
+    if (q.empty()) return fail(T("search_what"));
+    std::string err;
+    auto res = search_web(q, is_turkish(), &err);
+    if (res.empty()) return fail(err.find("HTTP") != std::string::npos || err.empty() ? F("web_none", {q}) : T("web_failed"), err);
+    json list = json::array();
+    for (auto& r : res) list.push_back({{"title", r.title}, {"url", r.url}, {"snippet", r.snippet}});
+    std::string top = res[0].snippet.empty() ? res[0].title : clip(res[0].snippet, 260);
+    return done(F("web_top", {res[0].title, top}),
+                {{"results", list}, {"note", "Use read_webpage on a result URL for details."}});
+}
+
+ToolResult t_news(const json& a, ToolContext& ctx) {
+    if (!ctx.cfg->allow_web) return fail(T("web_disabled"));
+    std::string topic = trim(str_arg(a, "topic"));
+    std::string err;
+    auto res = news_headlines(topic, is_turkish(), &err);
+    if (res.empty()) return fail(T("news_none"), err);
+    json list = json::array();
+    std::string heads;
+    for (size_t i = 0; i < res.size(); i++) {
+        list.push_back({{"title", res[i].title}, {"source", res[i].source}, {"url", res[i].url}});
+        if (i < 3) heads += (i ? "; " : "") + res[i].title;
+    }
+    return done(topic.empty() ? F("news_top", {heads}) : F("news_about", {topic, heads}), {{"headlines", list}});
+}
+
+ToolResult t_read_webpage(const json& a, ToolContext& ctx) {
+    if (!ctx.cfg->allow_web) return fail(T("web_disabled"));
+    std::string url = trim(str_arg(a, "url"));
+    if (url.empty()) return fail(T("open_what"));
+    std::string title, text, err;
+    if (!read_webpage(url, title, text, &err)) return fail(T("page_failed"), err);
+    bool cut = text.size() > 12000;
+    return done(F("page_read", {title.empty() ? url : title}),
+                {{"title", title}, {"url", url}, {"text", cut ? clip(text, 12000) : text}, {"truncated", cut}});
 }
 
 }  // namespace
@@ -350,6 +616,35 @@ json tool_schemas(const Config& cfg) {
     t.push_back(fn("read_clipboard", "Read the text the user copied (to summarize, translate or explain it)."));
     t.push_back(fn("calculate", "Evaluate arithmetic exactly, e.g. '(12.5*4)^2/3', 'sqrt(2)'.",
                    {{"expression", {{"type", "string"}}}}, {"expression"}));
+    if (cfg.allow_files) {
+        json path = {{"type", "string"},
+                     {"description", "A full path, or desktop / downloads / documents / pictures / music / videos / home "
+                                     "optionally followed by \\sub\\path. Relative names are on the desktop. A bare file "
+                                     "name is searched for."}};
+        t.push_back(fn("list_folder", "List the files and folders in a folder (newest first).", {{"path", path}}));
+        t.push_back(fn("find_files", "Search the user's folders for files or folders by name: words of the name or a "
+                                     "wildcard such as '*.pdf'.",
+                       {{"query", {{"type", "string"}}}, {"folder", path}}, {"query"}));
+        t.push_back(fn("read_file", "Read a text file (txt, md, csv, json, logs, source code...).", {{"path", path}}, {"path"}));
+        t.push_back(fn("write_file", "Create a text file, or append to one. Overwriting an existing file asks the user first.",
+                       {{"path", path}, {"content", {{"type", "string"}}}, {"append", {{"type", "boolean"}}}},
+                       {"path", "content"}));
+        t.push_back(fn("open_file", "Open a file or folder with its default app.", {{"path", path}}, {"path"}));
+        t.push_back(fn("move_file", "Move or rename a file or folder. Never overwrites.",
+                       {{"from", path}, {"to", path}}, {"from", "to"}));
+        t.push_back(fn("copy_file", "Copy a file or folder. Never overwrites.", {{"from", path}, {"to", path}}, {"from", "to"}));
+        t.push_back(fn("create_folder", "Create a folder.", {{"path", path}}, {"path"}));
+        t.push_back(fn("delete_file", "Move a file or folder to the Recycle Bin (asks the user to confirm).", {{"path", path}},
+                       {"path"}));
+    }
+    if (cfg.allow_web) {
+        t.push_back(fn("search_internet",
+                       "Search the internet and get the results (titles, links, snippets) to answer from, without opening "
+                       "the browser. Use for current events, prices, scores, facts you are unsure of.",
+                       {{"query", {{"type", "string"}}}}, {"query"}));
+        t.push_back(fn("get_news", "Latest news headlines, optionally about a topic.", {{"topic", {{"type", "string"}}}}));
+        t.push_back(fn("read_webpage", "Fetch a web page and get its readable text.", {{"url", {{"type", "string"}}}}, {"url"}));
+    }
     if (cfg.allow_shell)
         t.push_back(fn("run_command", "Run a Windows console (cmd) command and return its output.",
                        {{"command", {{"type", "string"}}}}, {"command"}));
@@ -379,6 +674,18 @@ ToolResult run_tool(const std::string& name, const json& args, ToolContext& ctx)
         if (name == "read_clipboard") return t_clipboard(ctx);
         if (name == "calculate") return t_calculate(args, ctx);
         if (name == "run_command") return t_run(args, ctx);
+        if (name == "list_folder") return t_list_folder(args, ctx);
+        if (name == "find_files") return t_find_files(args, ctx);
+        if (name == "read_file") return t_read_file(args, ctx);
+        if (name == "write_file") return t_write_file(args, ctx);
+        if (name == "open_file") return t_open_file(args, ctx);
+        if (name == "move_file") return t_transfer(args, ctx, true);
+        if (name == "copy_file") return t_transfer(args, ctx, false);
+        if (name == "create_folder") return t_create_folder(args, ctx);
+        if (name == "delete_file") return t_delete(args, ctx);
+        if (name == "search_internet") return t_search_internet(args, ctx);
+        if (name == "get_news") return t_news(args, ctx);
+        if (name == "read_webpage") return t_read_webpage(args, ctx);
     } catch (const std::exception& e) {
         return fail(T("tool_error"), e.what());
     }

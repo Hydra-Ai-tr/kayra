@@ -324,7 +324,8 @@ void usage() {
           "\n"
           "  kayra-cli                       sohbet / chat (type, Enter; 'q' quits)\n"
           "  kayra-cli ask \"saat kaç\"         one question, prints the reply\n"
-          "  kayra-cli say \"metin\" [--wav f]  speak, or write a WAV\n"
+          "  kayra-cli say \"metin\" [--wav f]  speak, or write a WAV (Windows voice)\n"
+          "      [--engine piper|edge|sapi] [--as voice-id]\n"
           "  kayra-cli voices                 Windows voices\n"
           "  kayra-cli listen                 microphone -> commands (Ctrl+C stops)\n"
           "  kayra-cli transcribe file.wav    speech to text\n"
@@ -392,6 +393,9 @@ int main() {
     }
     if (cmd == "say") {
         std::string wav = opt(a, "--wav");
+        cfg.voice_engine = opt(a, "--engine", cfg.voice_engine);
+        std::string nv = opt(a, "--as");
+        if (!nv.empty()) (cfg.voice_engine == "edge" ? cfg.edge_voice : cfg.voice_engine == "piper" ? cfg.piper_voice : cfg.voice) = nv;
         std::string text = rest();
         if (!wav.empty()) {
             double s = Speaker::synth_to_wav(text, wav, cfg.turkish() ? "tr" : "en", cfg.voice, cfg.voice_rate);
@@ -404,11 +408,24 @@ int main() {
         }
         Speaker sp;
         sp.start();
-        sp.configure(cfg.turkish() ? "tr" : "en", cfg.voice, cfg.voice_rate, cfg.voice_volume);
+        sp.configure(voice_settings(cfg));
+        double t0 = now_seconds();
+        int shown = -1;
+        while (!sp.engine_ready() && now_seconds() - t0 < 900) {
+            float p = sp.engine_progress();
+            if (p >= 0) {
+                if ((int)(p * 100) != shown) out("\rdownloading the voice " + std::to_string(shown = (int)(p * 100)) + "%   ");
+            } else if (now_seconds() - t0 > 10) {
+                break;
+            }
+            Sleep(100);
+        }
+        if (shown >= 0) outln("");
+        t0 = now_seconds();
         sp.speak(text);
         Sleep(300);
         while (sp.speaking()) Sleep(50);
-        outln(sp.voice_name());
+        outln(sp.voice_name() + "  (" + format_number(now_seconds() - t0, 2, false) + " s)");
         return 0;
     }
     if (cmd == "apps") {
@@ -477,7 +494,7 @@ int main() {
     Speaker sp;
     if (voice) {
         sp.start();
-        sp.configure(cfg.turkish() ? "tr" : "en", cfg.voice, cfg.voice_rate, cfg.voice_volume);
+        sp.configure(voice_settings(cfg));
     }
     std::thread([] { app_index().build(); }).detach();
     Assistant as(cfg, voice ? &sp : nullptr);

@@ -65,6 +65,9 @@ bool Config::load() {
     get(j, "temperature", temperature);
     get(j, "use_tools", use_tools);
     get(j, "speak", speak);
+    get(j, "voice_engine", voice_engine);
+    get(j, "piper_voice", piper_voice);
+    get(j, "edge_voice", edge_voice);
     get(j, "voice", voice);
     get(j, "voice_rate", voice_rate);
     get(j, "voice_volume", voice_volume);
@@ -75,8 +78,11 @@ bool Config::load() {
     get(j, "mic_device", mic_device);
     get(j, "vad_sensitivity", vad_sensitivity);
     get(j, "follow_up_seconds", follow_up_seconds);
+    get(j, "allow_files", allow_files);
+    get(j, "allow_web", allow_web);
     get(j, "allow_shell", allow_shell);
     get(j, "apps", apps);
+    if (voice_engine != "edge" && voice_engine != "sapi") voice_engine = "piper";
     get(j, "start_with_windows", start_with_windows);
     if (language != "en") language = "tr";
     if (wake_words.empty()) wake_words = {"kayra"};
@@ -96,6 +102,9 @@ bool Config::save() const {
         {"temperature", temperature},
         {"use_tools", use_tools},
         {"speak", speak},
+        {"voice_engine", voice_engine},
+        {"piper_voice", piper_voice},
+        {"edge_voice", edge_voice},
         {"voice", voice},
         {"voice_rate", voice_rate},
         {"voice_volume", voice_volume},
@@ -106,6 +115,8 @@ bool Config::save() const {
         {"mic_device", mic_device},
         {"vad_sensitivity", vad_sensitivity},
         {"follow_up_seconds", follow_up_seconds},
+        {"allow_files", allow_files},
+        {"allow_web", allow_web},
         {"allow_shell", allow_shell},
         {"apps", apps},
         {"start_with_windows", start_with_windows},

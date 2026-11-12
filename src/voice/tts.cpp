@@ -1,11 +1,15 @@
 #include "voice/tts.h"
 
 #include <windows.h>
+#include <mmsystem.h>
 #include <sapi.h>
 
+#include <algorithm>
 #include <cmath>
 
+#include "core/config.h"
 #include "core/util.h"
+#include "voice/neural.h"
 
 namespace kayra {
 
@@ -112,20 +116,242 @@ float viseme_open(int v) {
 
 }  // namespace
 
-Speaker::Speaker() = default;
+// Neural speech is queued on waveOut sentence by sentence; the playback position
+// gives the level the HUD core pulses with.
+struct Speaker::Player {
+    static constexpr int kRate = 24000;
+    struct Buf {
+        WAVEHDR h{};
+        std::vector<int16_t> pcm;
+        uint64_t start = 0;
+    };
+    std::mutex mu;
+    HWAVEOUT wo = nullptr;
+    std::deque<std::unique_ptr<Buf>> bufs;
+    uint64_t written = 0;
+
+    int reap_locked() {
+        int n = 0;
+        while (!bufs.empty() && (bufs.front()->h.dwFlags & WHDR_DONE)) {
+            waveOutUnprepareHeader(wo, &bufs.front()->h, sizeof(WAVEHDR));
+            bufs.pop_front();
+            n++;
+        }
+        return n;
+    }
+    int reap() {
+        std::lock_guard<std::mutex> lk(mu);
+        return reap_locked();
+    }
+    // false when the generation is stale (stopped meanwhile) or the device fails
+    bool play(std::vector<int16_t>&& pcm, unsigned gen, const std::atomic<unsigned>& current) {
+        std::lock_guard<std::mutex> lk(mu);
+        if (gen != current || pcm.empty()) return false;
+        if (!wo) {
+            WAVEFORMATEX f{};
+            f.wFormatTag = WAVE_FORMAT_PCM;
+            f.nChannels = 1;
+            f.nSamplesPerSec = kRate;
+            f.wBitsPerSample = 16;
+            f.nBlockAlign = 2;
+            f.nAvgBytesPerSec = kRate * 2;
+            if (waveOutOpen(&wo, WAVE_MAPPER, &f, 0, 0, CALLBACK_NULL) != MMSYSERR_NOERROR) {
+                wo = nullptr;
+                return false;
+            }
+        }
+        auto b = std::make_unique<Buf>();
+        b->pcm = std::move(pcm);
+        b->start = written;
+        b->h.lpData = (LPSTR)b->pcm.data();
+        b->h.dwBufferLength = (DWORD)(b->pcm.size() * 2);
+        if (waveOutPrepareHeader(wo, &b->h, sizeof(WAVEHDR)) != MMSYSERR_NOERROR) return false;
+        if (waveOutWrite(wo, &b->h, sizeof(WAVEHDR)) != MMSYSERR_NOERROR) {
+            waveOutUnprepareHeader(wo, &b->h, sizeof(WAVEHDR));
+            return false;
+        }
+        written += b->pcm.size();
+        bufs.push_back(std::move(b));
+        return true;
+    }
+    bool busy() {
+        std::lock_guard<std::mutex> lk(mu);
+        reap_locked();
+        return !bufs.empty();
+    }
+    void reset() {
+        std::lock_guard<std::mutex> lk(mu);
+        if (!wo) return;
+        waveOutReset(wo);
+        reap_locked();
+        written = 0;
+    }
+    float level() {
+        std::lock_guard<std::mutex> lk(mu);
+        if (!wo || bufs.empty()) return 0.0f;
+        MMTIME t{};
+        t.wType = TIME_SAMPLES;
+        if (waveOutGetPosition(wo, &t, sizeof t) != MMSYSERR_NOERROR || t.wType != TIME_SAMPLES) return 0.5f;
+        uint64_t pos = t.u.sample;
+        for (auto& b : bufs) {
+            if (pos < b->start || pos >= b->start + b->pcm.size()) continue;
+            size_t i0 = (size_t)(pos - b->start), i1 = std::min(b->pcm.size(), i0 + 720);
+            double acc = 0;
+            for (size_t i = i0; i < i1; i++) acc += (double)b->pcm[i] * b->pcm[i];
+            double rms = i1 > i0 ? std::sqrt(acc / (i1 - i0)) / 32768.0 : 0;
+            return (float)std::min(1.0, rms * 5.0);
+        }
+        return 0.0f;
+    }
+    void close() {
+        reset();
+        std::lock_guard<std::mutex> lk(mu);
+        if (wo) waveOutClose(wo);
+        wo = nullptr;
+    }
+};
+
+Speaker::Speaker() : player_(new Player) {}
 Speaker::~Speaker() { shutdown(); }
 
 void Speaker::start() {
     if (started_) return;
     started_ = true;
+    nquit_ = false;
     th_ = std::thread([this] { run(); });
+    nth_ = std::thread([this] { neural_run(); });
 }
 
 void Speaker::shutdown() {
     if (!started_) return;
     push({Cmd::Quit});
     if (th_.joinable()) th_.join();
+    nquit_ = true;
+    ncv_.notify_all();
+    if (nth_.joinable()) nth_.join();
+    prep_cancel_ = true;
+    if (prep_th_.joinable()) prep_th_.join();
     started_ = false;
+}
+
+bool Speaker::neural() const { return neural_on_; }
+
+VoiceSettings voice_settings(const Config& c) {
+    VoiceSettings s;
+    s.engine = c.voice_engine;
+    s.lang = c.turkish() ? "tr" : "en";
+    s.sapi_hint = c.voice;
+    s.piper_voice = c.piper_voice;
+    s.edge_voice = c.edge_voice;
+    s.rate = c.voice_rate;
+    s.volume = c.voice_volume;
+    return s;
+}
+
+void Speaker::refresh_engine() {
+    VoiceSettings s;
+    {
+        std::lock_guard<std::mutex> lk(nmu_);
+        s = vs_;
+    }
+    prepare_engine(s, true);
+}
+
+void Speaker::prepare_engine(const VoiceSettings& s, bool recheck) {
+    prep_cancel_ = true;
+    if (prep_th_.joinable()) prep_th_.join();
+    prep_cancel_ = false;
+    progress_ = -1.0f;
+    if (s.engine == "sapi") {
+        engine_ready_ = true;
+        return;
+    }
+    std::string voice = pick_neural_voice(s.engine, s.engine == "edge" ? s.edge_voice : s.piper_voice, s.lang);
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        neural_label_ = neural_label(s.engine, voice);
+    }
+    if (s.engine == "piper" && piper_ready(voice)) {
+        engine_ready_ = true;
+        return;
+    }
+    engine_ready_ = false;
+    prep_th_ = std::thread([this, s, voice, recheck] {
+        if (s.engine == "piper") {
+            progress_ = 0.0f;
+            std::string err;
+            bool ok = piper_install(voice, &progress_, &prep_cancel_, &err);
+            progress_ = -1.0f;
+            if (!ok) log("piper install: " + err);
+            engine_ready_ = ok;
+        } else {
+            bool ok = edge_available(recheck);
+            if (!ok) log("edge-tts is not installed; using the Windows voice");
+            engine_ready_ = ok;
+        }
+    });
+}
+
+void Speaker::neural_run() {
+    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    PiperEngine piper;
+    EdgeEngine edge;
+    std::string fallback_wav = app_dir() + "\\tts_fallback_" + std::to_string(GetCurrentProcessId()) + ".wav";
+    auto drop = [this](int n) {
+        while (n-- > 0) {
+            int v = npending_.load();
+            while (v > 0 && !npending_.compare_exchange_weak(v, v - 1)) {
+            }
+        }
+    };
+    for (;;) {
+        std::pair<std::string, unsigned> item;
+        VoiceSettings vs;
+        {
+            std::unique_lock<std::mutex> lk(nmu_);
+            ncv_.wait_for(lk, std::chrono::milliseconds(30), [&] { return nquit_ || !nq_.empty(); });
+            if (nquit_) break;
+            if (nq_.empty()) {
+                lk.unlock();
+                drop(player_->reap());
+                continue;
+            }
+            item = nq_.front();
+            nq_.pop_front();
+            vs = vs_;
+        }
+        drop(player_->reap());
+        if (item.second != gen_) continue;
+        Pcm pcm;
+        std::string err;
+        bool ok = false;
+        if (engine_ready_ && vs.engine == "piper")
+            ok = piper.synth(item.first, pick_neural_voice("piper", vs.piper_voice, vs.lang), 1.0 - 0.04 * vs.rate, pcm, &err);
+        else if (engine_ready_ && vs.engine == "edge")
+            ok = edge.synth(item.first, pick_neural_voice("edge", vs.edge_voice, vs.lang), vs.rate * 5, pcm, &err);
+        if (!ok) {
+            if (!err.empty()) log("neural voice: " + err);
+            ok = synth_to_wav(item.first, fallback_wav, vs.lang, vs.sapi_hint, vs.rate) > 0 && read_wav(fallback_wav, pcm);
+            DeleteFileW(widen(fallback_wav).c_str());
+        }
+        if (item.second != gen_) continue;
+        if (!ok) {
+            drop(1);
+            continue;
+        }
+        resample(pcm, Player::kRate);
+        if (vs.volume < 100) {
+            double g = std::max(0, vs.volume) / 100.0;
+            for (auto& x : pcm.samples) x = (int16_t)(x * g);
+        }
+        if (!player_->play(std::move(pcm.samples), item.second, gen_)) {
+            if (item.second == gen_) drop(1);
+        }
+    }
+    player_->close();
+    piper.close();
+    edge.close();
+    CoUninitialize();
 }
 
 void Speaker::push(Cmd c) {
@@ -137,18 +363,67 @@ void Speaker::push(Cmd c) {
     cv_.notify_one();
 }
 
-void Speaker::configure(const std::string& lang, const std::string& hint, int rate, int volume) {
+void Speaker::configure(const VoiceSettings& s) {
     Cmd c{Cmd::Configure};
-    c.lang = lang;
-    c.hint = hint;
-    c.rate = rate;
-    c.volume = volume;
+    c.lang = s.lang;
+    c.hint = s.sapi_hint;
+    c.rate = s.rate;
+    c.volume = s.volume;
     push(c);
+    bool changed;
+    {
+        std::lock_guard<std::mutex> lk(nmu_);
+        changed = vs_.engine != s.engine || vs_.lang != s.lang || vs_.piper_voice != s.piper_voice ||
+                  vs_.edge_voice != s.edge_voice || !started_once_;
+        vs_ = s;
+    }
+    started_once_ = true;
+    neural_on_ = s.engine != "sapi";
+    if (changed) prepare_engine(s);
 }
+
+namespace {
+// Sentences, short ones merged, so the first one plays while the rest is synthesized.
+std::vector<std::string> sentences(const std::string& text) {
+    std::vector<std::string> raw;
+    std::string cur;
+    for (size_t i = 0; i < text.size(); i++) {
+        char c = text[i];
+        cur += c;
+        bool end = (c == '.' || c == '!' || c == '?' || c == ';' || c == ':') && (i + 1 == text.size() || text[i + 1] == ' ');
+        if (end) {
+            raw.push_back(trim(cur));
+            cur.clear();
+        }
+    }
+    if (!trim(cur).empty()) raw.push_back(trim(cur));
+    std::vector<std::string> out;
+    for (auto& s : raw) {
+        if (s.empty()) continue;
+        if (!out.empty() && (out.back().size() < 40 || s.size() < 12) && out.back().size() + s.size() < 260)
+            out.back() += " " + s;
+        else
+            out.push_back(s);
+    }
+    return out;
+}
+}  // namespace
 
 void Speaker::speak(const std::string& text) {
     std::string t = speakable(text);
     if (t.empty()) return;
+    if (neural()) {
+        auto parts = sentences(t);
+        {
+            std::lock_guard<std::mutex> lk(nmu_);
+            for (auto& p : parts) {
+                npending_++;
+                nq_.push_back({p, gen_.load()});
+            }
+        }
+        ncv_.notify_one();
+        return;
+    }
     pending_++;
     speaking_ = true;
     Cmd c{Cmd::Speak};
@@ -159,11 +434,22 @@ void Speaker::speak(const std::string& text) {
 void Speaker::stop() {
     pending_ = 0;
     push({Cmd::Stop});
+    gen_++;
+    {
+        std::lock_guard<std::mutex> lk(nmu_);
+        nq_.clear();
+    }
+    player_->reset();
+    npending_ = 0;
 }
 
-bool Speaker::speaking() const { return speaking_ || pending_ > 0; }
+bool Speaker::speaking() const {
+    if (npending_ > 0 || player_->busy()) return true;
+    return speaking_ || pending_ > 0;
+}
 
 float Speaker::level() const {
+    if (npending_ > 0 || player_->busy()) return player_->level();
     if (!speaking()) return 0.0f;
     double t = now_seconds();
     double since = t - last_viseme_.load();
@@ -174,6 +460,7 @@ float Speaker::level() const {
 
 std::string Speaker::voice_name() const {
     std::lock_guard<std::mutex> lk(mu_);
+    if (neural_on_ && engine_ready_ && !neural_label_.empty()) return neural_label_;
     return voice_name_;
 }
 
