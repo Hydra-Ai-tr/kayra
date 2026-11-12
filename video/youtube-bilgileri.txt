@@ -1,0 +1,47 @@
+=============================== TÜRKÇE VİDEO (kayra-tanitim-tr.mp4) ===============================
+
+BAŞLIK:
+KAYRA – Türkçe konuşan kendi JARVIS'in: C++ ile yazılmış açık kaynak yapay zekâ asistanı
+
+AÇIKLAMA:
+Kayra, Tony Stark'ın JARVIS'inden ilham alan, Windows için yazılmış bir sesli asistan. "Kayra" deyin, isteğinizi söyleyin: saati, havayı, Wikipedia'dan bilgiyi söyler; uygulama ve site açar, YouTube'da arar, hatırlatma kurar, hesap yapar, sizi hatırlar. Ses tanıma tamamen bilgisayarınızda çalışır (whisper.cpp); sesiniz hiçbir yere gönderilmez. İsterseniz Ollama, LM Studio, Kor Studio, OpenAI, Gemini, Groq veya OpenRouter'ı beyin olarak bağlayıp serbest sohbet edebilirsiniz.
+
+Videodaki tüm uygulama görüntüleri gerçek kayıttır: uygulamanın kendisi, Kayra'nın kendi sesiyle.
+
+İndir (ücretsiz, ticari olmayan kullanım): https://github.com/Hydra-Ai-tr/kayra/releases/tag/v0.1.0
+Kaynak kod: https://github.com/Hydra-Ai-tr/kayra
+
+Bölümler:
+0:00 Giriş
+0:10 Sesle kontrol
+0:27 Hava ve bilgi
+0:56 Hatırlatma, uygulamalar ve medya
+1:17 Hesap ve hafıza
+1:34 Yapay zekâ beyni ve komut satırı
+
+ETİKETLER:
+yapay zeka, sesli asistan, JARVIS, Türkçe asistan, whisper.cpp, ses tanıma, C++, açık kaynak, Ollama, Windows, Kayra
+
+=============================== ENGLISH VIDEO (kayra-tanitim-en.mp4) ===============================
+
+TITLE:
+KAYRA – Your own JARVIS: an open-source voice AI assistant written in C++
+
+DESCRIPTION:
+Kayra is a voice assistant for Windows inspired by Tony Stark's JARVIS. Say "Kayra" and ask: it tells you the time, the weather and facts from Wikipedia; opens apps and sites, searches YouTube, sets reminders, does math and remembers you. Speech recognition runs entirely on your computer (whisper.cpp); your voice never leaves it. Optionally connect Ollama, LM Studio, Kor Studio, OpenAI, Gemini, Groq or OpenRouter as its brain for free conversation.
+
+Every shot of the app in this video is a real recording of the app itself, in Kayra's own voice.
+
+Download (free for noncommercial use): https://github.com/Hydra-Ai-tr/kayra/releases/tag/v0.1.0
+Source code: https://github.com/Hydra-Ai-tr/kayra
+
+Chapters:
+0:00 Intro
+0:10 Voice control
+0:27 Weather and facts
+0:52 Reminders, apps and media
+1:13 Math and memory
+1:30 AI brain and command line
+
+TAGS:
+AI, voice assistant, JARVIS, whisper.cpp, speech recognition, C++, open source, Ollama, Windows, Kayra

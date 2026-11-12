@@ -1,0 +1,19 @@
+{
+  "lang": "en",
+  "city": "London",
+  "voice_label": "ZIRA",
+  "steps": [
+    {"mark": "voice", "greet": "auto", "before": 1.2, "after": 0.8},
+    {"say": "Kayra", "before": 0.6, "speech": 0.7, "after": 0.3},
+    {"say": "What time is it?", "before": 0.3, "speech": 1.1},
+    {"mark": "info", "say": "Kayra, what's the weather in London?", "speech": 1.9},
+    {"say": "Kayra, who is Nikola Tesla?", "speech": 1.6},
+    {"mark": "timer", "say": "Kayra, remind me to call mom in ten minutes.", "speech": 2.3},
+    {"mark": "apps", "say": "Kayra, open Spotify.", "speech": 1.2},
+    {"say": "Kayra, play lofi beats on YouTube.", "speech": 1.9},
+    {"mark": "calc", "type": "What is 125 times 48?", "cps": 16},
+    {"say": "Kayra, remember that I take my coffee without sugar.", "speech": 2.5},
+    {"wait": 1.0}
+  ],
+  "outro": 1.0
+}

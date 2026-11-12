@@ -1,0 +1,19 @@
+{
+  "lang": "tr",
+  "city": "İstanbul",
+  "voice_label": "TOLGA",
+  "steps": [
+    {"mark": "voice", "greet": "auto", "before": 1.2, "after": 0.8},
+    {"say": "Kayra", "before": 0.6, "speech": 0.7, "after": 0.3},
+    {"say": "Saat kaç?", "before": 0.3, "speech": 1.0},
+    {"mark": "info", "say": "Kayra, İstanbul'da hava nasıl?", "speech": 1.9},
+    {"say": "Kayra, Nikola Tesla kimdir?", "speech": 1.7},
+    {"mark": "timer", "say": "Kayra, on dakika sonra toplantıyı hatırlat.", "speech": 2.3},
+    {"mark": "apps", "say": "Kayra, Spotify'ı aç.", "speech": 1.3},
+    {"say": "Kayra, YouTube'da lofi müzik aç.", "speech": 1.9},
+    {"mark": "calc", "type": "125 çarpı 48 kaç eder?", "cps": 16},
+    {"say": "Kayra, şunu hatırla: kahvemi şekersiz içerim.", "speech": 2.4},
+    {"wait": 1.0}
+  ],
+  "outro": 1.0
+}
