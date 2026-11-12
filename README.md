@@ -71,7 +71,7 @@ Ayarlar → Ses sekmesinden motor ve ses seçilir:
 
 ### Kurulum
 
-1. [Sürümler](https://github.com/Hydra-Ai-tr/kayra/releases/latest) sayfasından `kayra-0.1.0-windows-x64.zip` dosyasını indirip açın.
+1. [Sürümler](https://github.com/Hydra-Ai-tr/kayra/releases/latest) sayfasından `kayra-0.2.0-windows-x64.zip` dosyasını indirip açın.
 2. `kayra.exe`'yi çalıştırın. Mikrofon düğmesine basın ya da **Ctrl+Shift+K**'ye basıp konuşun.
 3. Ses modeli (Small, ~180 MB) ilk kullanımda `%APPDATA%\Kayra\models` klasörüne indirilir.
 
@@ -170,7 +170,7 @@ Pick an engine and a voice in Settings → Voice:
 
 ### Install
 
-1. Download `kayra-0.1.0-windows-x64.zip` from [Releases](https://github.com/Hydra-Ai-tr/kayra/releases/latest) and unzip it.
+1. Download `kayra-0.2.0-windows-x64.zip` from [Releases](https://github.com/Hydra-Ai-tr/kayra/releases/latest) and unzip it.
 2. Run `kayra.exe`. Press the microphone button, or press **Ctrl+Shift+K** and talk.
 3. The speech model (Small, ~180 MB) downloads to `%APPDATA%\Kayra\models` on first use.
 
