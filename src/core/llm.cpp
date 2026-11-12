@@ -1,5 +1,8 @@
 #include "core/llm.h"
 
+#include <windows.h>
+
+#include <cstdlib>
 #include <map>
 
 #include "core/http.h"
@@ -72,6 +75,9 @@ LlmResult LlmClient::request(const json& body, bool stream, const std::function<
                 json& c = calls[idx];
                 if (c.is_null()) c = {{"id", ""}, {"type", "function"}, {"function", {{"name", ""}, {"arguments", ""}}}};
                 if (tc.contains("id") && tc["id"].is_string() && !tc["id"].get<std::string>().empty()) c["id"] = tc["id"];
+                // Gemini 3 rejects the next turn unless its thought_signature (in extra_content) comes back
+                for (auto& [k, v] : tc.items())
+                    if (k != "index" && k != "id" && k != "type" && k != "function") c[k] = v;
                 if (tc.contains("function")) {
                     auto& f = tc["function"];
                     if (f.contains("name") && f["name"].is_string())
@@ -141,7 +147,24 @@ LlmResult LlmClient::chat(const json& messages, const json& tools, const std::fu
     bool with_tools = tools_supported_ && tools.is_array() && !tools.empty();
     if (with_tools) body["tools"] = tools;
     LlmResult r = request(body, true, on_text, cancel);
-    if (!r.ok && with_tools && r.content.empty() && contains(lower(r.error), "tool")) {
+    // busy (503) or over the per-minute quota (429): wait as long as the server asks, twice at most
+    for (int attempt = 0; attempt < 2 && !r.ok && r.content.empty(); attempt++) {
+        double wait = -1;
+        if (starts_with(r.error, "HTTP 503") || starts_with(r.error, "HTTP 500")) wait = 2.0 + attempt * 3.0;
+        if (starts_with(r.error, "HTTP 429")) {
+            size_t p = r.error.find("retry in ");
+            wait = p == std::string::npos ? 15.0 : std::atof(r.error.c_str() + p + 9) + 1.0;
+        }
+        if (wait < 0 || wait > 61) break;
+        log("LLM busy, retrying in " + std::to_string((int)wait) + " s");
+        for (double t = 0; t < wait; t += 0.1) {
+            if (cancel && *cancel) return r;
+            Sleep(100);
+        }
+        r = request(body, true, on_text, cancel);
+    }
+    if (!r.ok && with_tools && r.content.empty() && contains(lower(r.error), "tool") &&
+        !contains(r.error, "thought_signature") && !starts_with(r.error, "HTTP 429") && !starts_with(r.error, "HTTP 503")) {
         // the model has no tool support: talk without tools from now on
         log("LLM rejected tools, retrying without: " + r.error);
         tools_supported_ = false;

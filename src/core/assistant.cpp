@@ -409,6 +409,10 @@ std::string Assistant::run_llm(const Cfg& cfg, const std::string& text, size_t e
             messages.push_back({{"role", "tool"}, {"tool_call_id", call.value("id", "")}, {"name", name}, {"content", content.dump()}});
         }
     }
+    if (starts_with(error, "HTTP 429")) error = T("brain_quota");
+    else if (starts_with(error, "HTTP 503") || starts_with(error, "HTTP 500")) error = T("brain_busy");
+    else if (starts_with(error, "HTTP 401") || starts_with(error, "HTTP 403")) error = T("brain_key");
+    else if (starts_with(error, "HTTP 404")) error = T("brain_model");
     if (*failed) return F("brain_error", {error});
     if (shown.empty()) shown = error.empty() ? T("ok") : F("brain_error", {error});
     update_entry(entry, shown, false, used_tool);

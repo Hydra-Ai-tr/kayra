@@ -15,7 +15,7 @@ const std::vector<BrainPreset>& brain_presets() {
         {"lmstudio", "LM Studio (yerel / local)", "http://127.0.0.1:1234/v1", "local-model", false},
         {"kor", "Kor Studio (kor-cli serve)", "http://127.0.0.1:8765/v1", "kor", false},
         {"openai", "OpenAI", "https://api.openai.com/v1", "gpt-4o-mini", true},
-        {"gemini", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-2.0-flash", true},
+        {"gemini", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-3.5-flash", true},
         {"groq", "Groq", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile", true},
         {"openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "openai/gpt-4o-mini", true},
         {"custom", "OpenAI uyumlu / OpenAI-compatible", "http://127.0.0.1:8000/v1", "", false},
