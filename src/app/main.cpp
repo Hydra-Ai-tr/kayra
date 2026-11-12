@@ -1,6 +1,7 @@
 // KAYRA desktop app: the HUD window, the global hotkey and the settings.
 #include <windows.h>
 #include <objbase.h>
+#include <commdlg.h>
 #include <dwmapi.h>
 #include <shellapi.h>
 
@@ -85,7 +86,7 @@ private:
     void handle(const HudActions& a);
     void talk();
     void toggle_mic();
-    void open_settings();
+    void open_settings(int tab = 0);
     void settings_window();
     void tab_general();
     void tab_brain();
@@ -131,6 +132,7 @@ private:
 
     // settings window
     bool settings_open_ = false;
+    int settings_tab_ = -1;  // selected on the next frame
     Config edit_;
     std::string wake_buf_;
     std::vector<VoiceInfo> voices_;
@@ -166,6 +168,9 @@ bool App::create_window(bool minimized) {
     HWND hwnd = glfwGetWin32Window(win_);
     BOOL dark = TRUE;
     DwmSetWindowAttribute(hwnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &dark, sizeof dark);
+    COLORREF caption = RGB(4, 12, 20), border = RGB(10, 60, 80);
+    DwmSetWindowAttribute(hwnd, 35 /* DWMWA_CAPTION_COLOR */, &caption, sizeof caption);
+    DwmSetWindowAttribute(hwnd, 34 /* DWMWA_BORDER_COLOR */, &border, sizeof border);
     glfwMakeContextCurrent(win_);
     glfwSwapInterval(1);
     if (minimized) glfwIconifyWindow(win_);
@@ -398,7 +403,25 @@ HudState App::gather() {
         s.brain_label = T("ui_builtin");
     }
     s.voice_label = upper_ascii(short_voice(tts_.voice_name()));
+    s.user_name = cfg_.user_name;
+    s.brain_on = as_->brain_connected();
+    s.online = s.weather.ok || s.weather_loading;
+    s.tools_on = cfg_.use_tools;
+    s.files_on = cfg_.allow_files;
+    s.web_on = cfg_.allow_web;
+    s.shell_on = cfg_.allow_shell;
     return s;
+}
+
+std::string pick_file(GLFWwindow* win) {
+    wchar_t path[MAX_PATH] = {};
+    OPENFILENAMEW of{};
+    of.lStructSize = sizeof of;
+    of.hwndOwner = glfwGetWin32Window(win);
+    of.lpstrFile = path;
+    of.nMaxFile = MAX_PATH;
+    of.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    return GetOpenFileNameW(&of) ? narrow(path) : "";
 }
 
 void App::handle(const HudActions& a) {
@@ -415,12 +438,25 @@ void App::handle(const HudActions& a) {
     }
     if (a.talk) talk();
     if (a.clear) as_->clear_log();
-    if (a.open_settings) open_settings();
+    if (a.open_settings) open_settings(a.settings_tab);
+    if (!a.toggle_module.empty()) {
+        const std::string& m = a.toggle_module;
+        bool& flag = m == "files" ? cfg_.allow_files : m == "web" ? cfg_.allow_web : m == "shell" ? cfg_.allow_shell : cfg_.use_tools;
+        flag = !flag;
+        cfg_.save();
+        as_->set_config(cfg_);
+    }
+    if (a.attach) {
+        std::string f = pick_file(win_);
+        if (!f.empty()) hud_.set_input(F("attach_cmd", {f}));
+    }
 }
 
 // ------------------------------------------------------------------ settings
 
-void App::open_settings() {
+void App::open_settings(int tab) {
+    settings_tab_ = tab;
+    if (settings_open_) return;
     settings_open_ = true;
     edit_ = cfg_;
     wake_buf_.clear();
@@ -702,15 +738,17 @@ void App::settings_window() {
             static const Tab tabs[] = {{"set_general", &App::tab_general}, {"set_brain", &App::tab_brain},
                                        {"set_voice", &App::tab_voice},     {"set_listen", &App::tab_listen},
                                        {"set_memory", &App::tab_memory}};
-            for (auto& t : tabs) {
+            for (int i = 0; i < 5; i++) {
+                const Tab& t = tabs[i];
                 std::string label = T(t.key) + "###" + t.key;
-                if (ImGui::BeginTabItem(label.c_str())) {
+                if (ImGui::BeginTabItem(label.c_str(), nullptr, settings_tab_ == i ? ImGuiTabItemFlags_SetSelected : 0)) {
                     ImGui::Spacing();
                     (this->*t.fn)();
                     ImGui::EndTabItem();
                 }
             }
             ImGui::EndTabBar();
+            settings_tab_ = -1;
         }
         ImGui::EndChild();
         ImGui::PopItemWidth();

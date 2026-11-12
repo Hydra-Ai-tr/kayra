@@ -123,7 +123,7 @@ if(KAYRA_BUILD_GUI)
   endif()
 
   add_executable(kayra WIN32 src/app/main.cpp src/app/hud.cpp src/app/record.cpp assets/kayra.rc)
-  target_link_libraries(kayra PRIVATE kayracore imgui dwmapi)
+  target_link_libraries(kayra PRIVATE kayracore imgui dwmapi comdlg32)
   if(NOT MSVC)
     target_compile_options(kayra PRIVATE -Wall -Wextra)
   endif()

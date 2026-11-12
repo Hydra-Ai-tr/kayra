@@ -511,12 +511,24 @@ int Recorder::run(const std::vector<std::string>& args) {
     s_.brain_label = script.value("brain_label", T("ui_builtin"));
     s_.voice_label = script.value("voice_label", std::string("TOLGA"));
     s_.show_input = true;
+    s_.user_name = cfg_.user_name;
+    s_.brain_on = script.value("brain_on", true);
+    s_.online = true;
+    s_.tools_on = true;
+    s_.files_on = cfg_.allow_files;
+    s_.web_on = cfg_.allow_web;
+    s_.shell_on = cfg_.allow_shell;
     system_stats();
     idle_look();
 
     for (auto& step : script.value("steps", json::array())) {
         if (failed_) break;
         if (step.contains("mark")) events_.push_back({{"t", vt_}, {"type", "mark"}, {"name", step["mark"]}});
+        if (step.contains("page")) {
+            std::string p = step["page"].get<std::string>();
+            hud_.set_page(p == "system" ? Page::System : p == "chat" ? Page::Chat : p == "tools" ? Page::Tools
+                          : p == "modules" ? Page::Modules : p == "timers" ? Page::Timers : Page::Home);
+        }
         if (step.contains("wait")) {
             idle_look();
             hold(step["wait"].get<double>());

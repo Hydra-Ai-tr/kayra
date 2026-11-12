@@ -1,6 +1,7 @@
 #include <windows.h>
 
 GLFW_ICON ICON "kayra.ico"
+KAYRA_K RCDATA "logo-k.png"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION 0,1,0,0
