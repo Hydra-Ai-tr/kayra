@@ -814,12 +814,19 @@ int App::run(bool minimized) {
     as_->greet();
     if (cfg_.listen_on_start) ls_->start();
 
+    double next_frame = glfwGetTime();
     while (!glfwWindowShouldClose(win_)) {
         if (glfwGetWindowAttrib(win_, GLFW_ICONIFIED)) {
             glfwWaitEventsTimeout(0.1);
             update();
             continue;
         }
+        // a fixed frame budget: vsync alone does not throttle a covered window
+        bool focused = glfwGetWindowAttrib(win_, GLFW_FOCUSED);
+        next_frame += focused ? 1.0 / 30.0 : 1.0 / 10.0;
+        double now = glfwGetTime();
+        if (next_frame < now) next_frame = now;
+        for (double rem; (rem = next_frame - glfwGetTime()) > 0.001;) glfwWaitEventsTimeout(rem);
         glfwPollEvents();
         update();
         int fw, fh;
@@ -831,7 +838,7 @@ int App::run(bool minimized) {
             ImGui_ImplOpenGL3_DestroyFontsTexture();
             ImGui_ImplOpenGL3_CreateFontsTexture();
         }
-        glfwSwapInterval(glfwGetWindowAttrib(win_, GLFW_FOCUSED) ? 1 : 2);
+        glfwSwapInterval(focused ? 1 : 0);
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();

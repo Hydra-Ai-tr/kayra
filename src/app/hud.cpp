@@ -295,7 +295,7 @@ struct P3 {
 const std::vector<P3>& sphere_points() {
     static const std::vector<P3> pts = [] {
         std::vector<P3> v;
-        const int n = 3400;
+        const int n = 2200;
         const float golden = kPi * (3.0f - std::sqrt(5.0f));
         for (int i = 0; i < n; i++) {
             float y = 1.0f - 2.0f * (i + 0.5f) / n;
@@ -843,8 +843,8 @@ void Hud::core(ImDrawList* dl, const HudState& s, ImVec2 c, float r) {
     for (int i = 0; i < 4; i++) {
         for (int strand = 0; strand < 7; strand++) {
             float off = (strand - 3) * 0.035f;
-            for (int j = 0; j < 150; j++) {
-                float th = j * 2 * kPi / 150 + i * 0.8f;
+            for (int j = 0; j < 100; j++) {
+                float th = j * 2 * kPi / 100 + i * 0.8f;
                 float lat = -0.62f + i * 0.40f + off * (1.0f + 0.6f * std::sin(th * 3 + flow)) +
                             0.32f * std::sin(2 * th + flow * 0.55f + i * 1.7f) + 0.10f * std::sin(5 * th - flow * 1.1f + i);
                 float rr = 1.0f + amp * 0.7f * std::sin(3 * th + flow) + 0.015f * (strand - 3);
